@@ -6,6 +6,7 @@ from datetime import date
 from frederick_pipeline.analyze import infer_connections, render_report
 from frederick_pipeline.config import Settings, ensure_directories, load_sources
 from frederick_pipeline.db import (
+    clear_article_people,
     clear_connections_for_date,
     connect,
     fetch_pending_articles,
@@ -13,6 +14,7 @@ from frederick_pipeline.db import (
     insert_connection,
     mark_article_failed,
     mark_article_processed,
+    prune_orphan_people,
     upsert_alias,
     upsert_article,
     upsert_article_person,
@@ -54,8 +56,12 @@ def command_extract(settings: Settings, limit: int | None = None) -> None:
                     timeout_seconds=settings.article_timeout_seconds,
                 )
                 seen_at = article["published_at"] or article["fetched_at"]
+                clear_article_people(conn, int(article["id"]))
                 for extracted in people:
+                    if extracted.confidence is None or extracted.confidence < 0.5:
+                        continue
                     person_payload = {
+                        "person_key": extracted.person_key,
                         "canonical_name": extracted.canonical_name,
                         "primary_position": extracted.primary_position,
                         "primary_organization": extracted.primary_organization,
@@ -86,6 +92,7 @@ def command_extract(settings: Settings, limit: int | None = None) -> None:
                 mark_article_processed(conn, int(article["id"]))
             except Exception as exc:  # noqa: BLE001
                 mark_article_failed(conn, int(article["id"]), str(exc))
+        prune_orphan_people(conn)
 
 
 def command_report(settings: Settings, run_date: str) -> None:
@@ -114,6 +121,7 @@ def command_report(settings: Settings, run_date: str) -> None:
                 JOIN article_people ap ON ap.person_id = p.id
                 JOIN articles a ON a.id = ap.article_id
                 WHERE substr(COALESCE(a.published_at, a.fetched_at), 1, 10) = ?
+                  AND ap.confidence >= 0.5
                 ORDER BY p.last_seen_at DESC, p.canonical_name ASC
                 """,
                 (run_date,),
@@ -125,6 +133,7 @@ def command_report(settings: Settings, run_date: str) -> None:
                 SELECT
                     ap.article_id,
                     ap.person_id,
+                    ap.confidence,
                     ap.organization,
                     ap.address,
                     p.canonical_name

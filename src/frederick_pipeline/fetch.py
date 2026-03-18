@@ -32,6 +32,7 @@ class ArticleRecord:
     body_text: str | None
     article_hash: str | None
     fetched_at: str
+    extractor_name: str
     metadata: dict
 
 
@@ -78,6 +79,33 @@ def fetch_url(url: str, timeout_seconds: int) -> requests.Response:
     return response
 
 
+def build_google_news_article_url(entry: feedparser.FeedParserDict) -> str | None:
+    source = entry.get("source")
+    if isinstance(source, dict):
+        href = source.get("href")
+        if href:
+            return str(href)
+
+    summary = entry.get("summary") or entry.get("description") or ""
+    soup = BeautifulSoup(summary, "html.parser")
+    for anchor in soup.find_all("a", href=True):
+        href = anchor["href"]
+        parsed = urlparse(href)
+        if parsed.scheme in {"http", "https"} and "news.google.com" not in parsed.netloc:
+            return href
+    return None
+
+
+def resolve_entry_url(entry: feedparser.FeedParserDict, source: dict) -> str:
+    raw_url = entry.get("link", "")
+    if source.get("publisher") == "Google News":
+        article_url = build_google_news_article_url(entry)
+        if article_url:
+            return article_url
+        return ""
+    return raw_url
+
+
 def parse_published_at(entry: feedparser.FeedParserDict) -> str | None:
     for key in ("published", "updated", "created"):
         value = entry.get(key)
@@ -104,7 +132,7 @@ def fetch_source(source: dict, timeout_seconds: int, cache_dir: Path, max_articl
     articles: list[ArticleRecord] = []
 
     for entry in feed.entries:
-        raw_url = entry.get("link", "")
+        raw_url = resolve_entry_url(entry, source)
         if not raw_url:
             continue
 
@@ -124,6 +152,7 @@ def fetch_source(source: dict, timeout_seconds: int, cache_dir: Path, max_articl
             if body_text:
                 body_text = body_text[:max_article_chars]
             metadata["content_extraction"] = extraction_metadata
+            extractor_name = "beautifulsoup" if extraction_metadata.get("fallback") == "beautifulsoup" else "trafilatura"
 
             cache_path = cache_dir / f"{hashlib.sha1(normalized_url.encode('utf-8')).hexdigest()}.json"
             cache_path.write_text(
@@ -142,6 +171,7 @@ def fetch_source(source: dict, timeout_seconds: int, cache_dir: Path, max_articl
             )
         except Exception as exc:  # noqa: BLE001
             metadata["fetch_error"] = str(exc)
+            extractor_name = "fetch-error"
 
         summary = strip_html(entry.get("summary")) or strip_html(entry.get("description"))
         title = strip_html(entry.get("title")) or normalized_url
@@ -160,6 +190,7 @@ def fetch_source(source: dict, timeout_seconds: int, cache_dir: Path, max_articl
                 body_text=body_text,
                 article_hash=make_article_hash(title, body_text),
                 fetched_at=fetched_at,
+                extractor_name=extractor_name,
                 metadata=metadata,
             )
         )

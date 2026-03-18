@@ -9,6 +9,7 @@ from typing import Iterator
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
+PRAGMA foreign_keys=ON;
 
 CREATE TABLE IF NOT EXISTS articles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,6 +32,7 @@ CREATE TABLE IF NOT EXISTS articles (
 
 CREATE TABLE IF NOT EXISTS people (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    person_key TEXT,
     canonical_name TEXT NOT NULL UNIQUE,
     first_seen_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
@@ -98,6 +100,26 @@ def connect(db_path: Path) -> Iterator[sqlite3.Connection]:
 def initialize(db_path: Path) -> None:
     with connect(db_path) as conn:
         conn.executescript(SCHEMA)
+        _migrate_schema(conn)
+
+
+def _migrate_schema(conn: sqlite3.Connection) -> None:
+    article_columns = {row["name"] for row in conn.execute("PRAGMA table_info(articles)")}
+    if "extractor_name" not in article_columns:
+        conn.execute("ALTER TABLE articles ADD COLUMN extractor_name TEXT")
+
+    people_columns = {row["name"] for row in conn.execute("PRAGMA table_info(people)")}
+    if "person_key" not in people_columns:
+        conn.execute("ALTER TABLE people ADD COLUMN person_key TEXT")
+
+    conn.execute(
+        """
+        UPDATE people
+        SET person_key = lower(trim(canonical_name))
+        WHERE person_key IS NULL OR length(trim(person_key)) = 0
+        """
+    )
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_people_person_key ON people(person_key)")
 
 
 def upsert_article(conn: sqlite3.Connection, article: dict) -> int:
@@ -106,11 +128,11 @@ def upsert_article(conn: sqlite3.Connection, article: dict) -> int:
         """
         INSERT INTO articles (
             source_name, publisher, title, normalized_url, raw_url, published_at,
-            location_focus, summary, author, body_text, article_hash, fetched_at, metadata_json
+            location_focus, summary, author, body_text, article_hash, fetched_at, metadata_json, extractor_name
         )
         VALUES (
             :source_name, :publisher, :title, :normalized_url, :raw_url, :published_at,
-            :location_focus, :summary, :author, :body_text, :article_hash, :fetched_at, :metadata_json
+            :location_focus, :summary, :author, :body_text, :article_hash, :fetched_at, :metadata_json, :extractor_name
         )
         ON CONFLICT(normalized_url) DO UPDATE SET
             source_name=excluded.source_name,
@@ -123,7 +145,20 @@ def upsert_article(conn: sqlite3.Connection, article: dict) -> int:
             body_text=COALESCE(excluded.body_text, articles.body_text),
             article_hash=COALESCE(excluded.article_hash, articles.article_hash),
             fetched_at=excluded.fetched_at,
-            metadata_json=excluded.metadata_json
+            metadata_json=excluded.metadata_json,
+            extractor_name=excluded.extractor_name,
+            extraction_status=CASE
+                WHEN COALESCE(articles.article_hash, '') != COALESCE(excluded.article_hash, '')
+                    OR COALESCE(articles.extractor_name, '') != COALESCE(excluded.extractor_name, '')
+                THEN 'pending'
+                ELSE articles.extraction_status
+            END,
+            extraction_error=CASE
+                WHEN COALESCE(articles.article_hash, '') != COALESCE(excluded.article_hash, '')
+                    OR COALESCE(articles.extractor_name, '') != COALESCE(excluded.extractor_name, '')
+                THEN NULL
+                ELSE articles.extraction_error
+            END
         """,
         {**article, "metadata_json": metadata_json},
     )
@@ -169,27 +204,28 @@ def upsert_person(conn: sqlite3.Connection, person: dict, seen_at: str) -> int:
     conn.execute(
         """
         INSERT INTO people (
-            canonical_name, first_seen_at, last_seen_at, primary_position, primary_organization,
+            person_key, canonical_name, first_seen_at, last_seen_at, primary_position, primary_organization,
             primary_address, home_location, notes, metadata_json
         )
         VALUES (
-            :canonical_name, :seen_at, :seen_at, :primary_position, :primary_organization,
+            :person_key, :canonical_name, :seen_at, :seen_at, :primary_position, :primary_organization,
             :primary_address, :home_location, :notes, :metadata_json
         )
-        ON CONFLICT(canonical_name) DO UPDATE SET
+        ON CONFLICT(person_key) DO UPDATE SET
             last_seen_at=excluded.last_seen_at,
-            primary_position=COALESCE(people.primary_position, excluded.primary_position),
-            primary_organization=COALESCE(people.primary_organization, excluded.primary_organization),
-            primary_address=COALESCE(people.primary_address, excluded.primary_address),
-            home_location=COALESCE(people.home_location, excluded.home_location),
-            notes=COALESCE(people.notes, excluded.notes),
+            canonical_name=excluded.canonical_name,
+            primary_position=COALESCE(excluded.primary_position, people.primary_position),
+            primary_organization=COALESCE(excluded.primary_organization, people.primary_organization),
+            primary_address=COALESCE(excluded.primary_address, people.primary_address),
+            home_location=COALESCE(excluded.home_location, people.home_location),
+            notes=COALESCE(excluded.notes, people.notes),
             metadata_json=excluded.metadata_json
         """,
         {**person, "seen_at": seen_at, "metadata_json": metadata_json},
     )
     row = conn.execute(
-        "SELECT id FROM people WHERE canonical_name = ?",
-        (person["canonical_name"],),
+        "SELECT id FROM people WHERE person_key = ?",
+        (person["person_key"],),
     ).fetchone()
     return int(row["id"])
 
@@ -228,6 +264,41 @@ def upsert_article_person(conn: sqlite3.Connection, article_id: int, person_id: 
             metadata_json=excluded.metadata_json
         """,
         {**mention, "article_id": article_id, "person_id": person_id, "metadata_json": metadata_json},
+    )
+
+
+def clear_article_people(conn: sqlite3.Connection, article_id: int) -> None:
+    conn.execute("DELETE FROM article_people WHERE article_id = ?", (article_id,))
+
+
+def prune_orphan_people(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        DELETE FROM person_aliases
+        WHERE person_id NOT IN (SELECT id FROM people)
+        """
+    )
+    conn.execute(
+        """
+        DELETE FROM person_aliases
+        WHERE person_id IN (
+            SELECT p.id
+            FROM people p
+            LEFT JOIN article_people ap ON ap.person_id = p.id
+            WHERE ap.person_id IS NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        DELETE FROM people
+        WHERE id IN (
+            SELECT p.id
+            FROM people p
+            LEFT JOIN article_people ap ON ap.person_id = p.id
+            WHERE ap.person_id IS NULL
+        )
+        """
     )
 
 

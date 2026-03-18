@@ -9,6 +9,9 @@ def infer_connections(rows: list[dict], run_date: str) -> list[dict]:
     address_to_people: dict[str, list[dict]] = defaultdict(list)
 
     for row in rows:
+        confidence = row.get("confidence")
+        if confidence is None or confidence < 0.5:
+            continue
         article_to_people[row["article_id"]].append(row)
         if row["organization"]:
             org_to_people[row["organization"].strip().lower()].append(row)
@@ -65,7 +68,10 @@ def infer_connections(rows: list[dict], run_date: str) -> list[dict]:
                     }
                 )
 
-    return connections
+    return sorted(
+        connections,
+        key=lambda item: (-item["weight"], item["person_a_id"], item["person_b_id"], item["connection_type"]),
+    )
 
 
 def render_report(run_date: str, articles: list[dict], people: list[dict], connections: list[dict]) -> str:
