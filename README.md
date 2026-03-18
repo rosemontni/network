@@ -1,6 +1,6 @@
-# Frederick Population Intelligence Pipeline
+# Frederick Signal Atlas
 
-This project builds a local SQLite database of Frederick, Maryland public-interest news coverage and the people mentioned in that coverage.
+Frederick Signal Atlas builds a local SQLite database of Frederick, Maryland public-interest news coverage and the people mentioned in that coverage.
 
 It is designed for a daily workflow:
 

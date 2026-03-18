@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "frederick-population-pipeline"
+name = "frederick-signal-atlas"
 version = "0.1.0"
-description = "Daily Frederick, Maryland public-information population pipeline"
+description = "Daily Frederick, Maryland civic discovery and relationship-mapping pipeline"
 requires-python = ">=3.10"
 dependencies = [
   "beautifulsoup4>=4.12.3",
