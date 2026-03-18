@@ -1,0 +1,42 @@
+[
+  {
+    "name": "google-news-frederick-maryland",
+    "kind": "rss",
+    "url": "https://news.google.com/rss/search?q=%22Frederick%22+Maryland+when:7d&hl=en-US&gl=US&ceid=US:en",
+    "publisher": "Google News",
+    "location_focus": "Frederick, Maryland",
+    "tags": ["aggregated", "regional"]
+  },
+  {
+    "name": "city-of-frederick-news",
+    "kind": "rss",
+    "url": "https://cityoffrederickmd.gov/RSSFeed.aspx?CID=Frederick-News-1&ModID=1",
+    "publisher": "City of Frederick",
+    "location_focus": "Frederick, Maryland",
+    "tags": ["official", "municipal"]
+  },
+  {
+    "name": "city-of-frederick-police-news",
+    "kind": "rss",
+    "url": "https://cityoffrederickmd.gov/RSSFeed.aspx?CID=Police-News-5&ModID=1",
+    "publisher": "City of Frederick Police Department",
+    "location_focus": "Frederick, Maryland",
+    "tags": ["official", "police"]
+  },
+  {
+    "name": "frederick-county-news",
+    "kind": "rss",
+    "url": "https://www.frederickcountymd.gov/RSSFeed.aspx?CID=About-Frederick-Home-1&ModID=1",
+    "publisher": "Frederick County Government",
+    "location_focus": "Frederick County, Maryland",
+    "tags": ["official", "county"]
+  },
+  {
+    "name": "frederick-county-environment-news",
+    "kind": "rss",
+    "url": "https://www.frederickcountymd.gov/RSSFeed.aspx?CID=Division-of-Energy-Environment-News-82&ModID=1",
+    "publisher": "Frederick County Government",
+    "location_focus": "Frederick County, Maryland",
+    "tags": ["official", "county", "environment"]
+  }
+]
