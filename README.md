@@ -47,6 +47,8 @@ The local SQLite database stores:
 - `article_people`: article-scoped person mentions with confidence scores and article-local metadata
 - `inferred_connections`: same-day inferred links such as co-mentions, shared organizations, and shared addresses
 
+Daily markdown discovery files are written to `data/discoveries/YYYY-MM-DD.md`.
+
 Only higher-confidence article-person records are promoted into reports and connection analysis.
 
 ## Source Notes
@@ -55,3 +57,22 @@ The default source configuration includes official Frederick city and county fee
 
 - Official feeds generally work well for fetching and archiving.
 - Google News RSS is treated more defensively because some entries resolve to Google wrapper URLs instead of publisher article pages. If a publisher URL cannot be recovered, the item is skipped.
+
+## GitHub Actions
+
+The repository includes a scheduled workflow at [.github/workflows/daily-pipeline.yml](C:\Users\xliup\OneDrive\Documents\codex\network\.github\workflows\daily-pipeline.yml).
+
+- It runs every day at `13:05 UTC`.
+- In `America/New_York`, that is `9:05 AM EDT` during daylight saving time and `8:05 AM EST` during standard time.
+- It can also be triggered manually from the GitHub Actions tab with `workflow_dispatch`.
+- The workflow installs dependencies, runs `python -m frederick_pipeline daily-run`, and commits updated `data/` outputs back to `main`.
+
+### Required Repository Configuration
+
+Add this repository secret in GitHub if you want high-quality person extraction:
+
+- `OPENAI_API_KEY`: optional for basic fetch-only runs, recommended for production-quality people and connection data
+
+Optional repository variable:
+
+- `OPENAI_MODEL`: defaults to `gpt-4.1-mini`

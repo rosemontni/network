@@ -168,7 +168,7 @@ def command_report(settings: Settings, run_date: str) -> None:
             people=[dict(row) for row in people_rows],
             connections=named_connections,
         )
-        report_path = settings.report_dir / f"{run_date}.md"
+        report_path = settings.discovery_dir / f"{run_date}.md"
         report_path.write_text(report_text, encoding="utf-8")
 
 
