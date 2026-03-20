@@ -3,14 +3,14 @@ from __future__ import annotations
 from collections import defaultdict
 
 
-def infer_connections(rows: list[dict], run_date: str) -> list[dict]:
+def infer_connections(rows: list[dict], run_date: str, min_confidence: float = 0.4) -> list[dict]:
     article_to_people: dict[int, list[dict]] = defaultdict(list)
     org_to_people: dict[str, list[dict]] = defaultdict(list)
     address_to_people: dict[str, list[dict]] = defaultdict(list)
 
     for row in rows:
         confidence = row.get("confidence")
-        if confidence is None or confidence < 0.5:
+        if confidence is None or confidence < min_confidence:
             continue
         article_to_people[row["article_id"]].append(row)
         if row["organization"]:

@@ -1,13 +1,5 @@
 [
   {
-    "name": "google-news-frederick-maryland",
-    "kind": "rss",
-    "url": "https://news.google.com/rss/search?q=%22Frederick%22+Maryland+when:7d&hl=en-US&gl=US&ceid=US:en",
-    "publisher": "Google News",
-    "location_focus": "Frederick, Maryland",
-    "tags": ["aggregated", "regional"]
-  },
-  {
     "name": "city-of-frederick-news",
     "kind": "rss",
     "url": "https://cityoffrederickmd.gov/RSSFeed.aspx?CID=Frederick-News-1&ModID=1",

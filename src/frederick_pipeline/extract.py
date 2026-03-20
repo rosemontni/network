@@ -8,13 +8,106 @@ from dataclasses import dataclass
 import requests
 
 
-NAME_PATTERN = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b")
+NAME_PATTERN = re.compile(r"\b([A-Z][A-Za-z]+(?:[-'][A-Za-z]+)?(?:\s+(?:[A-Z][A-Za-z]+(?:[-'][A-Za-z]+)?|[A-Z]\.)){1,3})\b")
 ADDRESS_PATTERN = re.compile(
     r"\b\d{1,6}\s+[A-Z0-9][A-Za-z0-9.\- ]+\s(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Court|Ct)\b",
     re.IGNORECASE,
 )
 PERSON_SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
+TITLE_PREFIXES = {
+    "councilman",
+    "councilmember",
+    "councilwoman",
+    "delegate",
+    "dr",
+    "chief",
+    "commissioner",
+    "director",
+    "mayor",
+    "mr",
+    "mrs",
+    "ms",
+    "officer",
+    "president",
+    "secretary",
+    "senator",
+    "sheriff",
+}
+ORGANIZATION_SUFFIXES = {
+    "association",
+    "associates",
+    "commission",
+    "conservancy",
+    "council",
+    "department",
+    "division",
+    "hotel",
+    "inc",
+    "initiative",
+    "library",
+    "office",
+    "partners",
+    "society",
+    "stoppers",
+    "systems",
+    "team",
+    "unit",
+}
+NON_PERSON_FIRST_TOKENS = {
+    "america",
+    "annual",
+    "crime",
+    "design",
+    "emergency",
+    "free",
+    "for",
+    "go",
+    "got",
+    "how",
+    "monday",
+    "mount",
+    "national",
+    "neighborhood",
+    "on",
+    "read",
+    "several",
+    "starting",
+    "stay",
+    "text",
+    "top",
+    "tornado",
+    "to",
+}
+NON_PERSON_LAST_TOKENS = {
+    "act",
+    "aid",
+    "alert",
+    "analysts",
+    "application",
+    "cake",
+    "center",
+    "commission",
+    "conservancy",
+    "councils",
+    "element",
+    "hospital",
+    "management",
+    "more",
+    "noon",
+    "office",
+    "partners",
+    "planning",
+    "road",
+    "sportswear",
+    "stories",
+    "street",
+    "survey",
+    "tannery",
+    "thunderstorm",
+    "warning",
+}
 NON_PERSON_TERMS = {
+    "annual",
     "battalion",
     "board",
     "bureau",
@@ -30,16 +123,32 @@ NON_PERSON_TERMS = {
     "fire",
     "government",
     "health",
+    "historic",
+    "hospitality",
+    "hotel",
+    "library",
+    "local",
+    "manager",
     "operations",
     "paramedic",
     "police",
+    "planner",
     "program",
+    "project",
     "public",
     "rescue",
+    "room",
+    "satisfaction",
+    "scene",
+    "street",
+    "survey",
     "services",
     "state",
+    "supervisors",
+    "spring",
     "university",
     "volunteer",
+    "work",
 }
 
 
@@ -89,41 +198,185 @@ def looks_like_person_name(name: str) -> bool:
     lowered = [re.sub(r"[^a-z]", "", token.lower()) for token in tokens]
     if any(token in NON_PERSON_TERMS for token in lowered):
         return False
+    if lowered[0] in NON_PERSON_FIRST_TOKENS or lowered[-1] in NON_PERSON_LAST_TOKENS:
+        return False
     if tokens[0].lower() == "the":
         return False
-    return all(token[0].isupper() for token in tokens if token and token.lower() not in PERSON_SUFFIXES)
+    for token in tokens:
+        cleaned = re.sub(r"[^A-Za-z'.-]", "", token)
+        if not cleaned:
+            return False
+        if token.lower() not in PERSON_SUFFIXES and not cleaned[0].isupper():
+            return False
+    return True
+
+
+def normalize_candidate_name(name: str) -> tuple[str, str | None]:
+    tokens = [token for token in re.split(r"\s+", name.strip()) if token]
+    if not tokens:
+        return "", None
+    prefix = re.sub(r"[^a-z]", "", tokens[0].lower())
+    role = None
+    if prefix in TITLE_PREFIXES:
+        role = tokens[0]
+        tokens = tokens[1:]
+    if len(tokens) < 2:
+        return "", role
+    cleaned = " ".join(tokens)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned, role
+
+
+def extract_occurrence_snippets(text: str, name: str) -> list[str]:
+    snippets: list[str] = []
+    for match in re.finditer(re.escape(name), text):
+        start = max(0, match.start() - 120)
+        end = min(len(text), match.end() + 120)
+        snippet = re.sub(r"\s+", " ", text[start:end]).strip()
+        if snippet and snippet not in snippets:
+            snippets.append(snippet)
+        if len(snippets) >= 3:
+            break
+    return snippets
+
+
+def infer_fields_from_occurrence(text: str, name: str, prefixed_role: str | None) -> tuple[str | None, str | None, str | None, str | None]:
+    role = prefixed_role
+    organization = None
+    address = None
+    location_context = "Frederick, Maryland" if "Frederick" in text else None
+
+    pattern = re.compile(rf"{re.escape(name)},\s*([^.,;\n]{{3,100}})")
+    role_match = pattern.search(text)
+    if role_match and not role:
+        candidate = role_match.group(1).strip()
+        if len(candidate.split()) <= 12:
+            role = candidate
+
+    org_match = re.search(rf"{re.escape(name)}[^.\n]{{0,80}}\b(?:of|with|from|at)\s+([A-Z][A-Za-z&.\- ]{{3,80}})", text)
+    if org_match:
+        organization = org_match.group(1).strip(" ,.;")
+
+    address_match = ADDRESS_PATTERN.search(text)
+    if address_match:
+        address = address_match.group(0)
+
+    return role, organization, address, location_context
+
+
+def calculate_bootstrap_confidence(
+    name: str,
+    mention_count: int,
+    role: str | None,
+    organization: str | None,
+    address: str | None,
+    snippets: list[str],
+) -> float:
+    confidence = 0.15
+    if mention_count >= 2:
+        confidence += 0.1
+    if role:
+        confidence += 0.15
+    if organization:
+        confidence += 0.1
+    if address:
+        confidence += 0.05
+    if any("@" in snippet or re.search(r"\b\d{3}[-.)\s]\d{3}[-.\s]\d{4}\b", snippet) for snippet in snippets):
+        confidence += 0.1
+    if len(name.split()) >= 2:
+        confidence += 0.05
+    return round(min(confidence, 0.6), 2)
+
+
+def is_plausible_person_record(
+    name: str,
+    role: str | None,
+    organization: str | None,
+    snippets: list[str],
+    confidence: float,
+) -> bool:
+    lowered_tokens = [re.sub(r"[^a-z]", "", token.lower()) for token in name.split()]
+    if not lowered_tokens:
+        return False
+
+    if lowered_tokens[-1] in ORGANIZATION_SUFFIXES:
+        return False
+
+    if len(lowered_tokens) == 2 and all(len(token) <= 2 for token in lowered_tokens):
+        return False
+
+    text_blob = " ".join(snippets).lower()
+    has_contact_cue = any(marker in text_blob for marker in ("@", "contact", "phone", "call", "director", "manager", "planner"))
+    has_person_shape = len(lowered_tokens) >= 2 and all(token and token[0].isalpha() for token in lowered_tokens)
+
+    if role or has_contact_cue:
+        return True
+
+    if confidence >= 0.4 and has_person_shape and lowered_tokens[-1] not in NON_PERSON_LAST_TOKENS:
+        return True
+
+    return False
 
 
 def fallback_extract_people(text: str) -> list[ExtractedPerson]:
-    counts = Counter(match.group(1) for match in NAME_PATTERN.finditer(text))
-    addresses = ADDRESS_PATTERN.findall(text)
+    counts = Counter()
+    prefixed_roles: dict[str, str | None] = {}
+    for match in NAME_PATTERN.finditer(text):
+        raw_name = match.group(1)
+        normalized_name, prefixed_role = normalize_candidate_name(raw_name)
+        if not normalized_name:
+            continue
+        counts[normalized_name] += 1
+        prefixed_roles.setdefault(normalized_name, prefixed_role)
+
     people: list[ExtractedPerson] = []
     for name, count in counts.most_common(25):
         if name.lower().startswith(("frederick ", "maryland ", "county ", "city ")):
             continue
         if not looks_like_person_name(name):
             continue
-        address = addresses[0] if addresses else None
-        home_location = "Frederick, Maryland" if "Frederick" in text else None
+        role, organization, address, location_context = infer_fields_from_occurrence(text, name, prefixed_roles.get(name))
+        home_location = location_context
+        snippets = extract_occurrence_snippets(text, name)
+        confidence = calculate_bootstrap_confidence(
+            name=name,
+            mention_count=count,
+            role=role,
+            organization=organization,
+            address=address,
+            snippets=snippets,
+        )
+        if not is_plausible_person_record(
+            name=name,
+            role=role,
+            organization=organization,
+            snippets=snippets,
+            confidence=confidence,
+        ):
+            continue
+        metadata = {
+            "extractor": "fallback-regex",
+            "occurrence_snippets": snippets,
+        }
         people.append(
             ExtractedPerson(
-                person_key=normalize_person_key(name, None, address, home_location),
+                person_key=normalize_person_key(name, organization, address, home_location),
                 canonical_name=name,
                 aliases=[name],
-                primary_position=None,
-                primary_organization=None,
+                primary_position=role,
+                primary_organization=organization,
                 primary_address=address,
                 home_location=home_location,
-                notes="Fallback regex extraction. Low-confidence person record.",
+                notes="Bootstrap extraction from repeated full-name occurrences and nearby context.",
                 mention_count=count,
-                confidence=0.25,
-                role_in_article=None,
-                organization=None,
+                confidence=confidence,
+                role_in_article=role,
+                organization=organization,
                 address=address,
                 location_context=home_location,
                 quote_text=None,
-                summary="Mentioned in article text.",
-                metadata={"extractor": "fallback-regex"},
+                summary=snippets[0] if snippets else "Mentioned in article text.",
+                metadata=metadata,
             )
         )
     return people
@@ -264,6 +517,12 @@ def extract_people(article: dict, api_key: str | None, model: str, timeout_secon
         return []
 
     if api_key:
-        return llm_extract_people(article, api_key=api_key, model=model, timeout_seconds=timeout_seconds)
+        try:
+            return llm_extract_people(article, api_key=api_key, model=model, timeout_seconds=timeout_seconds)
+        except Exception as exc:  # noqa: BLE001
+            fallback_people = fallback_extract_people(text)
+            for person in fallback_people:
+                person.metadata["llm_error"] = str(exc)
+            return fallback_people
 
     return fallback_extract_people(text)

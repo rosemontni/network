@@ -53,10 +53,11 @@ Only higher-confidence article-person records are promoted into reports and conn
 
 ## Source Notes
 
-The default source configuration includes official Frederick city and county feeds plus a Google News RSS search.
+The default source configuration now focuses on official Frederick city and county feeds.
 
 - Official feeds generally work well for fetching and archiving.
-- Google News RSS is treated more defensively because some entries resolve to Google wrapper URLs instead of publisher article pages. If a publisher URL cannot be recovered, the item is skipped.
+- Aggregated Google News RSS was removed from the default source list because it frequently resolved to wrapper pages or publisher homepages rather than stable article URLs, which polluted early-stage extraction.
+- If you want to add broader media coverage later, prefer source-specific publisher feeds over aggregator wrappers.
 
 ## GitHub Actions
 

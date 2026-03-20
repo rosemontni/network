@@ -58,7 +58,7 @@ def command_extract(settings: Settings, limit: int | None = None) -> None:
                 seen_at = article["published_at"] or article["fetched_at"]
                 clear_article_people(conn, int(article["id"]))
                 for extracted in people:
-                    if extracted.confidence is None or extracted.confidence < 0.5:
+                    if extracted.confidence is None or extracted.confidence < settings.min_person_confidence:
                         continue
                     person_payload = {
                         "person_key": extracted.person_key,
@@ -121,10 +121,10 @@ def command_report(settings: Settings, run_date: str) -> None:
                 JOIN article_people ap ON ap.person_id = p.id
                 JOIN articles a ON a.id = ap.article_id
                 WHERE substr(COALESCE(a.published_at, a.fetched_at), 1, 10) = ?
-                  AND ap.confidence >= 0.5
+                  AND ap.confidence >= ?
                 ORDER BY p.last_seen_at DESC, p.canonical_name ASC
                 """,
-                (run_date,),
+                (run_date, settings.min_person_confidence),
             ).fetchall()
         )
         mention_rows = list(
@@ -146,7 +146,11 @@ def command_report(settings: Settings, run_date: str) -> None:
             ).fetchall()
         )
 
-        connections = infer_connections([dict(row) for row in mention_rows], run_date=run_date)
+        connections = infer_connections(
+            [dict(row) for row in mention_rows],
+            run_date=run_date,
+            min_confidence=settings.min_connection_confidence,
+        )
         for connection in connections:
             insert_connection(conn, connection)
 

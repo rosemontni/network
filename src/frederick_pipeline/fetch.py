@@ -16,6 +16,14 @@ from dateutil import parser as date_parser
 
 
 USER_AGENT = "FrederickPopulationPipeline/0.1 (+public-interest research)"
+FREDERICK_KEYWORDS = (
+    "frederick",
+    "frederick county",
+    "city of frederick",
+    "frederick md",
+    "frederick, maryland",
+    "frederick, md",
+)
 
 
 @dataclass
@@ -124,6 +132,13 @@ def strip_html(value: str | None) -> str | None:
     return re.sub(r"\s+", " ", text).strip() or None
 
 
+def article_is_relevant(source: dict, title: str | None, summary: str | None, body_text: str | None) -> bool:
+    if "official" in source.get("tags", []):
+        return True
+    haystack = " ".join(part for part in [title or "", summary or "", body_text or ""] if part).lower()
+    return any(keyword in haystack for keyword in FREDERICK_KEYWORDS)
+
+
 def fetch_source(source: dict, timeout_seconds: int, cache_dir: Path, max_article_chars: int) -> list[ArticleRecord]:
     if source["kind"] != "rss":
         raise ValueError(f"Unsupported source kind: {source['kind']}")
@@ -175,6 +190,9 @@ def fetch_source(source: dict, timeout_seconds: int, cache_dir: Path, max_articl
 
         summary = strip_html(entry.get("summary")) or strip_html(entry.get("description"))
         title = strip_html(entry.get("title")) or normalized_url
+
+        if not article_is_relevant(source, title=title, summary=summary, body_text=body_text):
+            continue
 
         articles.append(
             ArticleRecord(
