@@ -26,7 +26,7 @@ class Settings:
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
     article_timeout_seconds: int = int(os.getenv("ARTICLE_TIMEOUT_SECONDS", "20"))
     max_article_chars: int = int(os.getenv("MAX_ARTICLE_CHARS", "12000"))
-    min_person_confidence: float = float(os.getenv("MIN_PERSON_CONFIDENCE", "0.25"))
+    min_person_confidence: float = float(os.getenv("MIN_PERSON_CONFIDENCE", "0.35"))
     min_connection_confidence: float = float(os.getenv("MIN_CONNECTION_CONFIDENCE", "0.4"))
 
 

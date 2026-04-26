@@ -107,8 +107,8 @@ def command_report(settings: Settings, run_date: str) -> None:
                 """
                 SELECT *
                 FROM articles
-                WHERE substr(COALESCE(published_at, fetched_at), 1, 10) = ?
-                ORDER BY published_at DESC, id DESC
+                WHERE substr(fetched_at, 1, 10) = ?
+                ORDER BY fetched_at DESC, published_at DESC, id DESC
                 """,
                 (run_date,),
             ).fetchall()
@@ -120,7 +120,7 @@ def command_report(settings: Settings, run_date: str) -> None:
                 FROM people p
                 JOIN article_people ap ON ap.person_id = p.id
                 JOIN articles a ON a.id = ap.article_id
-                WHERE substr(COALESCE(a.published_at, a.fetched_at), 1, 10) = ?
+                WHERE substr(a.fetched_at, 1, 10) = ?
                   AND ap.confidence >= ?
                 ORDER BY p.last_seen_at DESC, p.canonical_name ASC
                 """,
@@ -140,7 +140,42 @@ def command_report(settings: Settings, run_date: str) -> None:
                 FROM article_people ap
                 JOIN people p ON p.id = ap.person_id
                 JOIN articles a ON a.id = ap.article_id
-                WHERE substr(COALESCE(a.published_at, a.fetched_at), 1, 10) = ?
+                WHERE substr(a.fetched_at, 1, 10) = ?
+                """,
+                (run_date,),
+            ).fetchall()
+        )
+        failed_rows = list(
+            conn.execute(
+                """
+                SELECT title, extraction_error
+                FROM articles
+                WHERE substr(fetched_at, 1, 10) = ?
+                  AND extraction_status = 'failed'
+                ORDER BY id DESC
+                LIMIT 10
+                """,
+                (run_date,),
+            ).fetchall()
+        )
+        status_row = conn.execute(
+            """
+            SELECT
+                SUM(CASE WHEN extraction_status = 'failed' THEN 1 ELSE 0 END) AS failed_articles,
+                SUM(CASE WHEN extraction_status = 'pending' THEN 1 ELSE 0 END) AS pending_articles
+            FROM articles
+            WHERE substr(fetched_at, 1, 10) = ?
+            """,
+            (run_date,),
+        ).fetchone()
+        source_counts = list(
+            conn.execute(
+                """
+                SELECT source_name, COUNT(*) AS article_count
+                FROM articles
+                WHERE substr(fetched_at, 1, 10) = ?
+                GROUP BY source_name
+                ORDER BY article_count DESC, source_name ASC
                 """,
                 (run_date,),
             ).fetchall()
@@ -171,6 +206,12 @@ def command_report(settings: Settings, run_date: str) -> None:
             articles=[dict(row) for row in article_rows],
             people=[dict(row) for row in people_rows],
             connections=named_connections,
+            diagnostics={
+                "failed_articles": int(status_row["failed_articles"] or 0),
+                "pending_articles": int(status_row["pending_articles"] or 0),
+                "failed_article_samples": [dict(row) for row in failed_rows],
+                "source_counts": [dict(row) for row in source_counts],
+            },
         )
         report_path = settings.discovery_dir / f"{run_date}.md"
         report_path.write_text(report_text, encoding="utf-8")

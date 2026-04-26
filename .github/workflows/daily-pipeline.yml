@@ -36,6 +36,38 @@ jobs:
         run: |
           python -m frederick_pipeline daily-run
 
+      - name: Print pipeline diagnostics
+        run: |
+          python - <<'PY'
+          import sqlite3
+          from datetime import date
+          from pathlib import Path
+
+          db_path = Path("data/frederick_people.db")
+          run_date = date.today().isoformat()
+          if not db_path.exists():
+              raise SystemExit("Database was not created.")
+
+          conn = sqlite3.connect(db_path)
+          cur = conn.cursor()
+          print("run_date", run_date)
+          for label, sql in [
+              ("articles_total", "select count(1) from articles"),
+              ("people_total", "select count(1) from people"),
+              ("mentions_total", "select count(1) from article_people"),
+              ("articles_reviewed_today", "select count(1) from articles where substr(fetched_at, 1, 10) = date('now')"),
+              ("people_seen_today", "select count(distinct p.id) from people p join article_people ap on ap.person_id = p.id join articles a on a.id = ap.article_id where substr(a.fetched_at, 1, 10) = date('now')"),
+              ("failed_today", "select count(1) from articles where extraction_status = 'failed' and substr(fetched_at, 1, 10) = date('now')"),
+              ("pending_today", "select count(1) from articles where extraction_status = 'pending' and substr(fetched_at, 1, 10) = date('now')"),
+          ]:
+              print(label, cur.execute(sql).fetchone()[0])
+
+          discovery = Path("data/discoveries") / f"{run_date}.md"
+          if discovery.exists():
+              print("--- discovery ---")
+              print(discovery.read_text(encoding="utf-8"))
+          PY
+
       - name: Commit generated outputs
         run: |
           git config user.name "github-actions[bot]"

@@ -74,7 +74,14 @@ def infer_connections(rows: list[dict], run_date: str, min_confidence: float = 0
     )
 
 
-def render_report(run_date: str, articles: list[dict], people: list[dict], connections: list[dict]) -> str:
+def render_report(
+    run_date: str,
+    articles: list[dict],
+    people: list[dict],
+    connections: list[dict],
+    diagnostics: dict | None = None,
+) -> str:
+    diagnostics = diagnostics or {}
     lines = [
         f"# Frederick Daily Network Report - {run_date}",
         "",
@@ -82,6 +89,8 @@ def render_report(run_date: str, articles: list[dict], people: list[dict], conne
         f"- Articles reviewed: {len(articles)}",
         f"- Documented individuals: {len(people)}",
         f"- Inferred connections: {len(connections)}",
+        f"- Extraction failures: {diagnostics.get('failed_articles', 0)}",
+        f"- Pending articles: {diagnostics.get('pending_articles', 0)}",
         "",
         "## People Seen Today",
     ]
@@ -108,5 +117,19 @@ def render_report(run_date: str, articles: list[dict], people: list[dict], conne
             lines.append(
                 f"- {connection['person_a_name']} <-> {connection['person_b_name']} | {connection['connection_type']} | {connection['rationale']}"
             )
+
+    failed_articles = diagnostics.get("failed_article_samples", [])
+    if failed_articles:
+        lines.extend(["", "## Extraction Warnings"])
+        for article in failed_articles[:10]:
+            title = article.get("title") or "Untitled"
+            error = (article.get("extraction_error") or "").replace("\n", " ")
+            lines.append(f"- {title}: {error[:240]}")
+
+    source_counts = diagnostics.get("source_counts", [])
+    if source_counts:
+        lines.extend(["", "## Sources Reviewed"])
+        for source in source_counts:
+            lines.append(f"- {source['source_name']}: {source['article_count']}")
 
     return "\n".join(lines) + "\n"

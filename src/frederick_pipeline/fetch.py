@@ -16,6 +16,7 @@ from dateutil import parser as date_parser
 
 
 USER_AGENT = "FrederickPopulationPipeline/0.1 (+public-interest research)"
+EXTRACTOR_VERSION = "person-bootstrap-v5"
 FREDERICK_KEYWORDS = (
     "frederick",
     "frederick county",
@@ -23,6 +24,8 @@ FREDERICK_KEYWORDS = (
     "frederick md",
     "frederick, maryland",
     "frederick, md",
+    "downtown frederick",
+    "frederick fairgrounds",
 )
 
 
@@ -132,9 +135,18 @@ def strip_html(value: str | None) -> str | None:
     return re.sub(r"\s+", " ", text).strip() or None
 
 
-def article_is_relevant(source: dict, title: str | None, summary: str | None, body_text: str | None) -> bool:
+def article_is_relevant(source: dict, raw_url: str, title: str | None, summary: str | None, body_text: str | None) -> bool:
     if "official" in source.get("tags", []):
         return True
+
+    title_summary = " ".join(part for part in [title or "", summary or ""] if part).lower()
+    lowered_url = raw_url.lower()
+    if "fredericknewspost.com/public/ap/" in lowered_url or "fredericknewspost.com/video-" in lowered_url:
+        return any(keyword in title_summary for keyword in FREDERICK_KEYWORDS)
+
+    if "publisher" in source.get("tags", []):
+        return any(keyword in title_summary for keyword in FREDERICK_KEYWORDS)
+
     haystack = " ".join(part for part in [title or "", summary or "", body_text or ""] if part).lower()
     return any(keyword in haystack for keyword in FREDERICK_KEYWORDS)
 
@@ -167,7 +179,8 @@ def fetch_source(source: dict, timeout_seconds: int, cache_dir: Path, max_articl
             if body_text:
                 body_text = body_text[:max_article_chars]
             metadata["content_extraction"] = extraction_metadata
-            extractor_name = "beautifulsoup" if extraction_metadata.get("fallback") == "beautifulsoup" else "trafilatura"
+            content_extractor = "beautifulsoup" if extraction_metadata.get("fallback") == "beautifulsoup" else "trafilatura"
+            extractor_name = f"{content_extractor}:{EXTRACTOR_VERSION}"
 
             cache_path = cache_dir / f"{hashlib.sha1(normalized_url.encode('utf-8')).hexdigest()}.json"
             cache_path.write_text(
@@ -191,7 +204,7 @@ def fetch_source(source: dict, timeout_seconds: int, cache_dir: Path, max_articl
         summary = strip_html(entry.get("summary")) or strip_html(entry.get("description"))
         title = strip_html(entry.get("title")) or normalized_url
 
-        if not article_is_relevant(source, title=title, summary=summary, body_text=body_text):
+        if not article_is_relevant(source, raw_url=raw_url, title=title, summary=summary, body_text=body_text):
             continue
 
         articles.append(

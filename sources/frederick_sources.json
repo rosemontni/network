@@ -1,5 +1,13 @@
 [
   {
+    "name": "frederick-news-post",
+    "kind": "rss",
+    "url": "https://www.fredericknewspost.com/search/?f=rss",
+    "publisher": "The Frederick News-Post",
+    "location_focus": "Frederick County, Maryland",
+    "tags": ["publisher", "regional"]
+  },
+  {
     "name": "city-of-frederick-news",
     "kind": "rss",
     "url": "https://cityoffrederickmd.gov/RSSFeed.aspx?CID=Frederick-News-1&ModID=1",

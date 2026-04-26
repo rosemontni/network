@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS articles (
 CREATE TABLE IF NOT EXISTS people (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     person_key TEXT,
-    canonical_name TEXT NOT NULL UNIQUE,
+    canonical_name TEXT NOT NULL,
     first_seen_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
     primary_position TEXT,
@@ -112,6 +112,12 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     if "person_key" not in people_columns:
         conn.execute("ALTER TABLE people ADD COLUMN person_key TEXT")
 
+    people_sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'people'"
+    ).fetchone()["sql"]
+    if "canonical_name TEXT NOT NULL UNIQUE" in people_sql:
+        _rebuild_people_without_canonical_unique(conn)
+
     conn.execute(
         """
         UPDATE people
@@ -120,6 +126,59 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_people_person_key ON people(person_key)")
+    conn.execute(
+        """
+        UPDATE articles
+        SET extraction_status = 'pending', extraction_error = NULL
+        WHERE extraction_status = 'failed'
+          AND extraction_error LIKE '%UNIQUE constraint failed: people.canonical_name%'
+        """
+    )
+
+
+def _rebuild_people_without_canonical_unique(conn: sqlite3.Connection) -> None:
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS people_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            person_key TEXT,
+            canonical_name TEXT NOT NULL,
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            primary_position TEXT,
+            primary_organization TEXT,
+            primary_address TEXT,
+            home_location TEXT,
+            notes TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO people_new (
+            id, person_key, canonical_name, first_seen_at, last_seen_at, primary_position,
+            primary_organization, primary_address, home_location, notes, metadata_json
+        )
+        SELECT
+            id,
+            COALESCE(NULLIF(trim(person_key), ''), lower(trim(canonical_name))),
+            canonical_name,
+            first_seen_at,
+            last_seen_at,
+            primary_position,
+            primary_organization,
+            primary_address,
+            home_location,
+            notes,
+            metadata_json
+        FROM people
+        """
+    )
+    conn.execute("DROP TABLE people")
+    conn.execute("ALTER TABLE people_new RENAME TO people")
+    conn.execute("PRAGMA foreign_keys=ON")
 
 
 def upsert_article(conn: sqlite3.Connection, article: dict) -> int:
